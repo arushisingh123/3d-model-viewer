@@ -1,48 +1,77 @@
-"use client";
+import formidable from 'formidable-serverless';
+import fs from 'fs';
+import path from 'path';
 
-import axios from 'axios';
-import { useState } from 'react';
+const uploadDir = path.join(process.cwd(), 'public/uploads');
+const tempDir = path.join(process.cwd(), 'public/temp');
 
-const ModelUploader = ({ setModelFiles }) => {
-  const [uploadStatus, setUploadStatus] = useState('');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+if (!fs.existsSync(tempDir)) {
+  fs.mkdirSync(tempDir, { recursive: true });
+}
 
-  const handleFileChange = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append("file", file);
-
-    try {
-      const response = await axios.post("/api/upload", formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
-      if (response.status === 200) {
-        const filePath = response.data.path;
-        const fileURL = `${window.location.origin}${filePath}`;
-        const fileType = file.name.split('.').pop();  // gets 'gltf' or 'obj' based on file extension
-        setModelFiles([{ url: fileURL, name: file.name, type: fileType }]);
-        setUploadStatus('File uploaded successfully.');
-      } else {
-        setUploadStatus('File upload failed: ' + response.data.error);
-        console.error('File upload failed:', response.data.error);
-      }
-    } catch (error) {
-      setUploadStatus('Error uploading file: ' + (error.response ? error.response.data.error : error.message));
-      console.error('Error uploading file:', error.response ? error.response.data.error : error.message);
-    }
-  };
-
-  return (
-    <div>
-      <input type="file" onChange={handleFileChange} accept=".gltf, .obj" />
-      {uploadStatus && <p>{uploadStatus}</p>}
-    </div>
-  );
+export const config = {
+  api: {
+    bodyParser: false,
+  }
 };
 
-export default ModelUploader;
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', ['POST']);
+    return res.status(405).end('Method Not Allowed');
+  }
 
+  const form = new formidable.IncomingForm({
+    uploadDir: tempDir,
+    keepExtensions: true,
+    maxFileSize: 20 * 1024 * 1024, // 20 MB
+  });
+
+  form.parse(req, async (err, fields, files) => {
+    if (err) {
+      console.error("Formidable Error:", err);
+      return res.status(500).json({ error: err.message });
+    }
+
+    const file = files.file;
+    if (!file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const filePath = file.path;
+    const newFilename = `${Date.now()}-${file.originalFilename}`; // Use originalFilename
+    const tempFilePath = path.join(tempDir, newFilename);
+
+    try {
+      if (path.extname(file.originalFilename).toLowerCase() === '.gltf') {
+        const data = fs.readFileSync(filePath, 'utf-8');
+        const processedData = processGLTF(JSON.parse(data));
+        fs.writeFileSync(tempFilePath, JSON.stringify(processedData), 'utf-8');
+      } else if (path.extname(file.originalFilename).toLowerCase() === '.obj') {
+        fs.renameSync(filePath, tempFilePath);  // Move file to new location
+      } else {
+        fs.unlinkSync(filePath);  // Remove the file immediately if not supported
+        return res.status(400).json({ error: "Unsupported file type" });
+      }
+
+      res.status(200).json({
+        message: "File uploaded and processed successfully",
+        path: `/uploads/${newFilename}`  // Change to uploads for clarity in path
+      });
+    } catch (error) {
+      console.error("File Processing Error:", error);
+      res.status(500).json({ error: "Failed to process file" });
+      if (fs.existsSync(tempFilePath)) {
+        fs.unlinkSync(tempFilePath);  // Cleanup temp file on error
+      }
+    }
+  });
+}
+
+function processGLTF(data) {
+  // Potentially modify or validate GLTF data here
+  return data;
+}
