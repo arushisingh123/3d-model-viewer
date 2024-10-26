@@ -1,10 +1,13 @@
 "use client";
 import { Suspense, useCallback, useEffect, useMemo, useState, useRef } from 'react';
-import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
+import { Canvas, useFrame, useLoader, useThree, extend  } from '@react-three/fiber';
 import { OrbitControls, Environment, PerspectiveCamera, Html } from '@react-three/drei';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader';
 import * as THREE from 'three';
+
+extend({ PlaneGeometry: THREE.PlaneGeometry });
+
 
 const Model = ({ file, type, materialType, animationSpeed }) => {
   const obj = useLoader(type === 'gltf' ? GLTFLoader : OBJLoader, file);
@@ -28,6 +31,8 @@ const Model = ({ file, type, materialType, animationSpeed }) => {
         const material = materialType === 'basic' ? basicMaterial : standardMaterial;
         child.material = material;
         child.userData.selectable = true;  
+        child.castShadow = true; // Enable shadows for the model
+        child.receiveShadow = true; // Allow model to receive shadows
       }
     });
 
@@ -88,8 +93,16 @@ console.log('model', modelFiles);
       <Suspense fallback={<Html center>Loading...</Html>}>
         <PerspectiveCamera makeDefault fov={75} position={[3, 3, 3]} />
         <ambientLight intensity={0.3} />
-        <spotLight position={[10, 10, 10]} intensity={1.5} castShadow />
+        <spotLight position={[10, 10, 10]} intensity={1.5} castShadow 
+        shadow-mapSize-width={1024}
+        shadow-mapSize-height={1024}
+        shadow-bias={-0.0005} // Adjust bias to prevent shadow artifacts
+        />
         <OrbitControls target={[0, 0, 0]} enablePan={true} enableZoom={true} enableRotate={true} />
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -5, 0]} receiveShadow>
+          <planeGeometry args={[100, 100]} />
+          <shadowMaterial opacity={0.5} />
+        </mesh>
         <Environment preset="sunset" background/>
         {modelFiles.map(file => (
           <Model key={file.url} file={file.url} type={file.type} materialType={materialType} animationSpeed={animationSpeed}/>
